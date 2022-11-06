@@ -53,7 +53,7 @@ function find_all_servers(ns, queue, servers = new Set()) {
         return find_all_servers(ns, queue, servers);
     }
     servers.add(current);
-    ns.scan(current).forEach(server => servers.add(server));
+    ns.scan(current).forEach(server => queue.push(server));
     return find_all_servers(ns, queue, servers);
 }
 

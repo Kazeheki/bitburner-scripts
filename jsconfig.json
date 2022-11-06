@@ -4,6 +4,7 @@
     "checkJs": true,
     "lib": [
       "ES2015"
-    ]
+    ],
+    "target": "ES2022"
   }
 }
