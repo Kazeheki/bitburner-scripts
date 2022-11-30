@@ -4,7 +4,8 @@ const SCRIPTS = [
     "/find/backdoorable.js",
     "/find/server.js",
     "/access.js",
-    "/utils.js"
+    "/utils.js",
+    "/weaken.js"
 ];
 
 /**
