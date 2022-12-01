@@ -3,9 +3,9 @@ import { all_hackable, HACK_FILES, hack_file_to_function } from "utils";
 const SCRIPTS = [
     "/find/backdoorable.js",
     "/find/server.js",
-    "/access.js",
-    "/utils.js",
-    "/weaken.js"
+    "access.js",
+    "utils.js",
+    "weaken.js"
 ];
 
 /**
