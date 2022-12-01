@@ -125,3 +125,20 @@ export function hack_file_to_function(ns, file) {
             return (_) => { throw Error("Unknown hack-file") };
     }
 }
+
+const SCRIPTS = [
+    "/find/backdoorable.js",
+    "/find/server.js",
+    "access.js",
+    "utils.js",
+    "weaken.js"
+];
+/**
+ * Arm server with all needed files.
+ *
+ * @param {import("external/NetscriptDefinitions").NS} ns
+ * @param {string} server
+ */
+export function arm(ns, server) {
+    ns.scp(SCRIPTS, server, "home");
+}
