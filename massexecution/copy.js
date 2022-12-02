@@ -17,4 +17,5 @@ export async function main(ns) {
     }
 
     all_hacked(ns).forEach((server) => ns.scp(script.toString(), server));
+    ns.getPurchasedServers().forEach((server) => ns.scp(script.toString(), server));
 }

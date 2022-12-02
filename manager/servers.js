@@ -71,6 +71,7 @@ async function expand(ns) {
                 ns.killall(server);
                 ns.deleteServer(server);
                 ns.purchaseServer(server, next_ram);
+                arm(ns, server);
             }
         }
 
