@@ -23,7 +23,7 @@ export async function main(ns) {
         ram_cost
     );
 
-    all_hacked(ns).forEach(curried_execute);
+    ns.getPurchasedServers().concat(all_hacked(ns)).forEach(curried_execute);
 }
 
 /**
