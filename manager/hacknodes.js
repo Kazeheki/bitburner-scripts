@@ -1,4 +1,5 @@
 const budget_percentage = 0.3;
+const wait_time = 20_000;
 
 /**
  * Manage hacknodes.
@@ -22,7 +23,7 @@ async function manage(ns) {
         action.execute();
     }
 
-    await ns.sleep(20_000);
+    await ns.sleep(wait_time);
 }
 
 /**
