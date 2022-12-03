@@ -132,12 +132,14 @@ class Node {
         let buy_amount = 0;
         while (can_buy_level) {
             const max_reached = this.stats.level >= MAX_LEVEL;
-            const level_cost = this.ns.hacknet.getLevelUpgradeCost(this.index, buy_amount);
-            can_buy_level = !max_reached && left_budget > level_cost;
+            const cost = this.ns.hacknet.getLevelUpgradeCost(this.index, buy_amount);
+            can_buy_level = !max_reached && left_budget > cost;
             if (!can_buy_level) {
                 continue;
             }
-            actions.push(new UpgradeLevelAction(this.ns, this));
+            if (buy_amount != 0) {
+                actions.push(new UpgradeLevelAction(this.ns, this));
+            }
             buy_amount++;
         }
         left_budget -= this.ns.hacknet.getLevelUpgradeCost(this.index, buy_amount - 1);
@@ -146,12 +148,14 @@ class Node {
         buy_amount = 0;
         while (can_buy_ram) {
             const max_reached = this.stats.ram >= MAX_RAM;
-            const level_cost = this.ns.hacknet.getRamUpgradeCost(this.index, buy_amount);
-            can_buy_ram = !max_reached && left_budget > level_cost;
+            const cost = this.ns.hacknet.getRamUpgradeCost(this.index, buy_amount);
+            can_buy_ram = !max_reached && left_budget > cost;
             if (!can_buy_ram) {
                 continue;
             }
-            actions.push(new UpgradeRamAction(this.ns, this));
+            if (buy_amount != 0) {
+                actions.push(new UpgradeRamAction(this.ns, this));
+            }
             buy_amount++;
         }
         left_budget -= this.ns.hacknet.getRamUpgradeCost(this.index, buy_amount - 1);
@@ -160,12 +164,14 @@ class Node {
         buy_amount = 0;
         while (can_buy_cores) {
             const max_reached = this.stats.cores >= MAX_CORES;
-            const level_cost = this.ns.hacknet.getCoreUpgradeCost(this.index, buy_amount);
-            can_buy_cores = !max_reached && left_budget > level_cost;
+            const cost = this.ns.hacknet.getCoreUpgradeCost(this.index, buy_amount);
+            can_buy_cores = !max_reached && left_budget > cost;
             if (!can_buy_cores) {
                 continue;
             }
-            actions.push(new UpgradeCoresAction(this.ns, this));
+            if (buy_amount != 0) {
+                actions.push(new UpgradeCoresAction(this.ns, this));
+            }
             buy_amount++;
         }
         left_budget -= this.ns.hacknet.getCoreUpgradeCost(this.index, buy_amount - 1);
