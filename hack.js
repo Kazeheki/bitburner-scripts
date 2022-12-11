@@ -22,6 +22,11 @@ export async function main(ns) {
         const available_money = ns.getServerMoneyAvailable(target);
         const server_growth = ns.getServerGrowth(target);
 
+        if (available_money <= 0) {
+            needs_new_target = true;
+            continue;
+        }
+
         if (!last_hack_successful || is_hard_to_hack(ns, target, min_security_level)) {
             await ns.weaken(target);
             last_hack_successful = true;
