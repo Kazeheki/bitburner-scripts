@@ -43,7 +43,7 @@ function mark_if_hacked(ns) {
  * @param {string[]} seen
  * @return {string[]}
  */
-function recursive_path(ns, start, target, seen = []) {
+export function recursive_path(ns, start, target, seen = []) {
     if (start === target) {
         return [];
     }
