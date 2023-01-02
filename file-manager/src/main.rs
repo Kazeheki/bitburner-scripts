@@ -2,12 +2,14 @@
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{process, thread};
 
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::{Error, Message};
 use tungstenite::Result;
@@ -19,7 +21,7 @@ const JSONRPC_VERSION: &str = "2.0";
 static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Possible methods for interacting with Bitburner remote API.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 enum BitburnerMethod {
     /// Create or update a file.
@@ -88,6 +90,7 @@ async fn main() {
     let listener = TcpListener::bind(&addr).await.expect("Cannot bind server");
 
     info!("Listening on {}", addr);
+    info!("Waiting for connection...");
 
     while let Ok((stream, _)) = listener.accept().await {
         let peer = stream.peer_addr().expect("No peer address");
@@ -113,14 +116,30 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     let ws_stream = accept_async(stream).await.expect("Was not able to accept");
     info!("New websocket connection with {}", peer);
 
-    let (mut tx, mut rx) = ws_stream.split();
+    let (mut outgoing, mut incoming) = ws_stream.split();
 
-    let request = Request::get_file_names();
-    let request = serde_json::to_string(&request).unwrap();
+    let (method_sender, mut method_receiver) = mpsc::unbounded_channel::<BitburnerMethod>();
+
+    let inquire_thread = thread::Builder::new()
+        .spawn(move || loop {
+            let options = vec!["file names", "quit"];
+            let answer: Result<&str, _> =
+                inquire::Select::new("What do you want to do?", options).prompt();
+
+            match answer {
+                Ok(x) if x == "file names" => {
+                    method_sender.send(BitburnerMethod::GetFileNames).unwrap()
+                }
+                Ok(x) if x == "quit" => process::exit(0),
+                _ => unreachable!("how did you get here?"),
+            }
+            thread::park();
+        })
+        .unwrap();
 
     tokio::spawn(async move {
         loop {
-            while let Some(msg) = rx.next().await {
+            while let Some(msg) = incoming.next().await {
                 let msg = msg.unwrap();
                 if msg.is_close() {
                     break;
@@ -134,12 +153,21 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                         error!("RPC error: {}", err);
                     }
                 }
+                inquire_thread.thread().unpark();
             }
         }
     });
 
-    debug!("Sending message: {}", request);
-    tx.send(Message::text(request)).await?;
+    tokio::spawn(async move {
+        while let Some(method) = method_receiver.recv().await {
+            debug!("Will execute method {:?}", method);
+            let request = Request::get_file_names();
+            let request = serde_json::to_string(&request).unwrap();
+
+            debug!("Sending message: {}", request);
+            outgoing.send(Message::text(request)).await.unwrap();
+        }
+    });
 
     Ok(())
 }
