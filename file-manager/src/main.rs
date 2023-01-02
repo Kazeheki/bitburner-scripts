@@ -66,19 +66,43 @@ impl Request<'_> {
             params: Some(params),
         }
     }
+
+    /// Get the definition file of the API.
+    /// Bitburner will answer with [`Response<String>`]
+    fn get_definition_file() -> Self {
+        Request {
+            jsonrpc: JSONRPC_VERSION,
+            id: REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+            method: BitburnerMethod::GetDefinitionFile,
+            params: None,
+        }
+    }
 }
 
 /// Response from Bitburner remote API.
 #[derive(Serialize, Deserialize, Debug)]
-struct Response<'a, T> {
-    /// Version of jsonrpc.
-    jsonrpc: &'a str,
-    /// Request ID.
-    id: usize,
-    /// Result from the request.
-    result: Option<T>,
-    /// Error on executing request.
-    error: Option<String>,
+#[serde(untagged)]
+enum GenericResponse<'a> {
+    StringResponse {
+        /// Version of jsonrpc.
+        jsonrpc: &'a str,
+        /// Request ID.
+        id: usize,
+        /// Result from the request.
+        result: Option<String>,
+        /// Error on executing request.
+        error: Option<String>,
+    },
+    VecResponse {
+        /// Version of jsonrpc.
+        jsonrpc: &'a str,
+        /// Request ID.
+        id: usize,
+        /// Result from the request.
+        result: Option<Vec<String>>,
+        /// Error on executing request.
+        error: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -123,7 +147,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
 
     let inquire_thread = thread::Builder::new()
         .spawn(move || loop {
-            let options = vec!["file names", "quit"];
+            let options = vec!["file names", "definition", "quit"];
             let answer: Result<&str, _> =
                 inquire::Select::new("What do you want to do?", options).prompt();
 
@@ -131,6 +155,9 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                 Ok(x) if x == "file names" => {
                     method_sender.send(BitburnerMethod::GetFileNames).unwrap()
                 }
+                Ok(x) if x == "definition" => method_sender
+                    .send(BitburnerMethod::GetDefinitionFile)
+                    .unwrap(),
                 Ok(x) if x == "quit" => process::exit(0),
                 _ => unreachable!("how did you get here?"),
             }
@@ -146,12 +173,25 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                     break;
                 }
                 if let tungstenite::Message::Text(msg) = msg {
-                    let response: Response<Vec<String>> =
-                        serde_json::from_str(msg.as_str()).unwrap();
-                    if let Some(result) = response.result {
-                        info!("result: {:#?}", result);
-                    } else if let Some(err) = response.error {
-                        error!("RPC error: {}", err);
+                    let response: GenericResponse = serde_json::from_str(msg.as_str()).unwrap();
+
+                    match response {
+                        GenericResponse::VecResponse { result, error, .. } => {
+                            if let Some(content) = result {
+                                info!("result:\n{}", content.join("\n"));
+                            }
+                            if let Some(error) = error {
+                                error!("RPC error: {}", error);
+                            }
+                        }
+                        GenericResponse::StringResponse { result, error, .. } => {
+                            if let Some(content) = result {
+                                info!("result:\n{}", content);
+                            }
+                            if let Some(error) = error {
+                                error!("RPC error: {}", error);
+                            }
+                        }
                     }
                 }
                 inquire_thread.thread().unpark();
@@ -162,11 +202,16 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     tokio::spawn(async move {
         while let Some(method) = method_receiver.recv().await {
             debug!("Will execute method {:?}", method);
-            let request = Request::get_file_names();
-            let request = serde_json::to_string(&request).unwrap();
 
-            debug!("Sending message: {}", request);
-            outgoing.send(Message::text(request)).await.unwrap();
+            let request = match method {
+                BitburnerMethod::GetFileNames => Request::get_file_names(),
+                BitburnerMethod::GetDefinitionFile => Request::get_definition_file(),
+                _ => todo!("not yet implemented"),
+            };
+            let request_json = serde_json::to_string(&request).unwrap();
+
+            debug!("Sending message: {}", request_json);
+            outgoing.send(Message::text(request_json)).await.unwrap();
         }
     });
 
