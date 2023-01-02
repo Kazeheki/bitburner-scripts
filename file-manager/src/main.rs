@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{process, thread};
 
 use futures_util::{SinkExt, StreamExt};
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::net::{TcpListener, TcpStream};
@@ -94,7 +94,7 @@ async fn main() {
 
     while let Ok((stream, _)) = listener.accept().await {
         let peer = stream.peer_addr().expect("No peer address");
-        info!("Peer address: {}", peer);
+        debug!("Peer address: {}", peer);
 
         tokio::spawn(accept_connection(peer, stream));
     }
@@ -102,7 +102,7 @@ async fn main() {
 
 /// Accepting websocket connections.
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
-    info!("Accepting connection");
+    trace!("Accepting connection");
 
     if let Err(e) = handle_connection(peer, stream).await {
         match e {
@@ -114,7 +114,8 @@ async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
 
 async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     let ws_stream = accept_async(stream).await.expect("Was not able to accept");
-    info!("New websocket connection with {}", peer);
+    debug!("New websocket connection with {}", peer);
+    info!("Connected");
 
     let (mut outgoing, mut incoming) = ws_stream.split();
 
