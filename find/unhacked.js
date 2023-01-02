@@ -12,8 +12,12 @@ export async function main(ns) {
         ns.tprint("No servers found");
         return;
     }
+    let servers_with_level = servers.map(server => [server, ns.getServerRequiredHackingLevel(server)]);
+    servers_with_level.sort((left, right) => {
+        return +left[1] - +right[1];
+    });
     ns.tprint("");
-    for (let server of servers) {
-        ns.tprintf("%s (%d)", server, ns.getServerRequiredHackingLevel(server));
+    for (let server of servers_with_level) {
+        ns.tprintf("%s (%d)", server[0], server[1]);
     }
 }
