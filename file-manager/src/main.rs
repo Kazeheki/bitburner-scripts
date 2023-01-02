@@ -1,6 +1,7 @@
 //! Websocket Server to remotely manage the files on your Bitburner home server.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
@@ -13,6 +14,9 @@ use tungstenite::Result;
 
 /// Current version of the used jsonrpc.
 const JSONRPC_VERSION: &str = "2.0";
+
+/// Counter for request IDs.
+static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Possible methods for interacting with Bitburner remote API.
 #[derive(Serialize, Deserialize)]
@@ -40,7 +44,7 @@ struct Request<'a> {
     /// Version of jsonrpc.
     jsonrpc: &'a str,
     /// Request ID.
-    id: u32,
+    id: usize,
     /// Method that the request invokes.
     method: BitburnerMethod,
     /// Generic parameters that can be set specific to a request.
@@ -55,7 +59,7 @@ impl Request<'_> {
         params.insert(String::from("server"), json!("home"));
         Request {
             jsonrpc: JSONRPC_VERSION,
-            id: 1,
+            id: REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             method: BitburnerMethod::GetFileNames,
             params: Some(params),
         }
@@ -68,7 +72,7 @@ struct Response<'a, T> {
     /// Version of jsonrpc.
     jsonrpc: &'a str,
     /// Request ID.
-    id: u32,
+    id: usize,
     /// Result from the request.
     result: Option<T>,
     /// Error on executing request.
