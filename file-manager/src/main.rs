@@ -2,6 +2,7 @@
 
 use futures_util::SinkExt;
 use futures_util::StreamExt;
+use log::debug;
 use log::{error, info};
 use serde::Deserialize;
 use serde::Serialize;
@@ -16,6 +17,26 @@ use tokio_tungstenite::{
 };
 use tungstenite::Result;
 
+/// Possible methods for interacting with Bitburner remote API.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum BitburnerMethod {
+    /// Create or update a file.
+    PushFile,
+    /// Read a file and it's content.
+    GetFile,
+    /// Delete a file.
+    DeleteFile,
+    /// List all file names on a server.
+    GetFileNames,
+    /// Get the content of all files on a server.
+    GetAllFiles,
+    /// Calculate the in-game ram cost of a script.
+    CalculateRam,
+    /// Get the definition file of the API.
+    GetDefinitionFile,
+}
+
 /// Request for any method to execute on remote API.
 #[derive(Serialize, Deserialize)]
 struct Request {
@@ -23,15 +44,14 @@ struct Request {
     jsonrpc: String,
     /// Request ID.
     id: u32,
-    /// Method name.
-    method: String,
+    /// Method that the request invokes.
+    method: BitburnerMethod,
     /// Generic parameters that can be set specific to a request.
     params: Option<Map<String, Value>>,
 }
 
 impl Request {
     /// Get all names of files on the home server.
-    ///
     /// Bitburner will answer with [`Response<T>`].
     fn get_file_names() -> Self {
         let mut params = Map::with_capacity(1);
@@ -39,7 +59,7 @@ impl Request {
         Request {
             jsonrpc: String::from("2.0"),
             id: 1,
-            method: String::from("getFileNames"),
+            method: BitburnerMethod::GetFileNames,
             params: Some(params),
         }
     }
@@ -105,13 +125,19 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                     break;
                 }
                 if let tungstenite::Message::Text(msg) = msg {
-                    let response: Response<Vec<String>> = serde_json::from_str(msg.as_str()).unwrap();
-                    info!("result: {:#?}", response.result.unwrap());
+                    let response: Response<Vec<String>> =
+                        serde_json::from_str(msg.as_str()).unwrap();
+                    if let Some(result) = response.result {
+                        info!("result: {:#?}", result);
+                    } else if let Some(err) = response.error {
+                        error!("RPC error: {}", err);
+                    }
                 }
             }
         }
     });
 
+    debug!("Sending message: {}", request);
     tx.send(Message::text(request)).await?;
 
     Ok(())
