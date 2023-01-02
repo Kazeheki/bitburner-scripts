@@ -11,6 +11,9 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::{Error, Message};
 use tungstenite::Result;
 
+/// Current version of the used jsonrpc.
+const JSONRPC_VERSION: &str = "2.0";
+
 /// Possible methods for interacting with Bitburner remote API.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,9 +36,9 @@ enum BitburnerMethod {
 
 /// Request for any method to execute on remote API.
 #[derive(Serialize, Deserialize)]
-struct Request {
+struct Request<'a> {
     /// Version of jsonrpc.
-    jsonrpc: String,
+    jsonrpc: &'a str,
     /// Request ID.
     id: u32,
     /// Method that the request invokes.
@@ -44,14 +47,14 @@ struct Request {
     params: Option<Map<String, Value>>,
 }
 
-impl Request {
+impl Request<'_> {
     /// Get all names of files on the home server.
     /// Bitburner will answer with [`Response<T>`].
     fn get_file_names() -> Self {
         let mut params = Map::with_capacity(1);
         params.insert(String::from("server"), json!("home"));
         Request {
-            jsonrpc: String::from("2.0"),
+            jsonrpc: JSONRPC_VERSION,
             id: 1,
             method: BitburnerMethod::GetFileNames,
             params: Some(params),
@@ -61,9 +64,9 @@ impl Request {
 
 /// Response from Bitburner remote API.
 #[derive(Serialize, Deserialize, Debug)]
-struct Response<T> {
+struct Response<'a, T> {
     /// Version of jsonrpc.
-    jsonrpc: String,
+    jsonrpc: &'a str,
     /// Request ID.
     id: u32,
     /// Result from the request.
