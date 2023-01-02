@@ -1,3 +1,5 @@
+//! Websocket Server to remotely manage the files on your Bitburner home server.
+
 use futures_util::SinkExt;
 use futures_util::StreamExt;
 use log::{error, info};
@@ -14,23 +16,36 @@ use tokio_tungstenite::{
 };
 use tungstenite::Result;
 
+/// Request for any method to execute on remote API.
 #[derive(Serialize, Deserialize)]
 struct Request {
+    /// Version of jsonrpc.
     jsonrpc: String,
+    /// Request ID.
     id: u32,
+    /// Method name.
     method: String,
+    /// Generic parameters that can be set specific to a request.
     params: Option<Map<String, Value>>,
 }
 
+/// Response for request to get all files on home server.
+/// see [`get_file_names`](Request::get_file_names).
 #[derive(Serialize, Deserialize, Debug)]
 struct GetFilesResponse {
+    /// Version of jsonrpc.
     jsonrpc: String,
+    /// Request ID.
     id: u32,
+    /// Name of all the servers.
     result: Option<Vec<String>>,
+    /// Map of all errors while executing the request.
     error: Option<Map<String, Value>>,
 }
 
 impl Request {
+    /// Get all names of files on the home server.
+    /// Bitburner will answer with [`GetFilesResponse`].
     fn get_file_names() -> Self {
         let mut params = Map::with_capacity(1);
         params.insert(String::from("server"), json!("home"));
@@ -61,6 +76,7 @@ async fn main() {
     }
 }
 
+/// Accepting websocket connections.
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     info!("Accepting connection");
 
@@ -101,6 +117,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     Ok(())
 }
 
+/// Clean up after the client closed the connection.
 fn handle_close() {
     info!("not implemented");
 }
