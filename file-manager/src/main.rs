@@ -29,23 +29,10 @@ struct Request {
     params: Option<Map<String, Value>>,
 }
 
-/// Response for request to get all files on home server.
-/// see [`get_file_names`](Request::get_file_names).
-#[derive(Serialize, Deserialize, Debug)]
-struct GetFilesResponse {
-    /// Version of jsonrpc.
-    jsonrpc: String,
-    /// Request ID.
-    id: u32,
-    /// Name of all the servers.
-    result: Option<Vec<String>>,
-    /// Map of all errors while executing the request.
-    error: Option<Map<String, Value>>,
-}
-
 impl Request {
     /// Get all names of files on the home server.
-    /// Bitburner will answer with [`GetFilesResponse`].
+    ///
+    /// Bitburner will answer with [`Response<T>`].
     fn get_file_names() -> Self {
         let mut params = Map::with_capacity(1);
         params.insert(String::from("server"), json!("home"));
@@ -56,6 +43,19 @@ impl Request {
             params: Some(params),
         }
     }
+}
+
+/// Response from Bitburner remote API.
+#[derive(Serialize, Deserialize, Debug)]
+struct Response<T> {
+    /// Version of jsonrpc.
+    jsonrpc: String,
+    /// Request ID.
+    id: u32,
+    /// Result from the request.
+    result: Option<T>,
+    /// Error on executing request.
+    error: Option<String>,
 }
 
 #[tokio::main]
@@ -105,7 +105,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                     break;
                 }
                 if let tungstenite::Message::Text(msg) = msg {
-                    let response: GetFilesResponse = serde_json::from_str(msg.as_str()).unwrap();
+                    let response: Response<Vec<String>> = serde_json::from_str(msg.as_str()).unwrap();
                     info!("result: {:#?}", response.result.unwrap());
                 }
             }
