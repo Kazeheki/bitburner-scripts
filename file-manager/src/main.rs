@@ -8,11 +8,13 @@ use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use tokio::fs;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::{Error, Message};
 use tungstenite::Result;
+use walkdir::{DirEntry, WalkDir};
 
 /// Current version of the used jsonrpc.
 const JSONRPC_VERSION: &str = "2.0";
@@ -41,7 +43,7 @@ enum BitburnerMethod {
 }
 
 /// Request for any method to execute on remote API.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Request<'a> {
     /// Version of jsonrpc.
     jsonrpc: &'a str,
@@ -75,6 +77,22 @@ impl Request<'_> {
             id: REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             method: BitburnerMethod::GetDefinitionFile,
             params: None,
+        }
+    }
+
+    /// Push the file with the given name and content.
+    /// Bitburner will answer with [`Response<String>`].
+    fn push_file(name: &str, content: &str) -> Self {
+        let mut params = Map::with_capacity(3);
+        params.insert(String::from("server"), json!("home"));
+        params.insert(String::from("filename"), json!(name));
+        params.insert(String::from("content"), json!(content));
+
+        Request {
+            jsonrpc: JSONRPC_VERSION,
+            id: REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+            method: BitburnerMethod::PushFile,
+            params: Some(params),
         }
     }
 }
@@ -147,7 +165,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
 
     let inquire_thread = thread::Builder::new()
         .spawn(move || loop {
-            let options = vec!["file names", "definition", "quit"];
+            let options = vec!["file names", "push all", "definition", "quit"];
             let answer: Result<&str, _> =
                 inquire::Select::new("What do you want to do?", options).prompt();
 
@@ -155,6 +173,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                 Ok(x) if x == "file names" => {
                     method_sender.send(BitburnerMethod::GetFileNames).unwrap()
                 }
+                Ok(x) if x == "push all" => method_sender.send(BitburnerMethod::PushFile).unwrap(),
                 Ok(x) if x == "definition" => method_sender
                     .send(BitburnerMethod::GetDefinitionFile)
                     .unwrap(),
@@ -203,15 +222,45 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
         while let Some(method) = method_receiver.recv().await {
             debug!("Will execute method {:?}", method);
 
-            let request = match method {
-                BitburnerMethod::GetFileNames => Request::get_file_names(),
-                BitburnerMethod::GetDefinitionFile => Request::get_definition_file(),
-                _ => todo!("not yet implemented"),
-            };
-            let request_json = serde_json::to_string(&request).unwrap();
+            let mut requests: Vec<Request> = vec![];
 
-            debug!("Sending message: {}", request_json);
-            outgoing.send(Message::text(request_json)).await.unwrap();
+            match method {
+                BitburnerMethod::GetFileNames => requests.push(Request::get_file_names()),
+                BitburnerMethod::GetDefinitionFile => requests.push(Request::get_definition_file()),
+                BitburnerMethod::PushFile => {
+                    let mut files = WalkDir::new("..").into_iter();
+
+                    loop {
+                        let entry = match files.next() {
+                            None => break,
+                            Some(Err(e)) => panic!("Error while walking dir: {}", e),
+                            Some(Ok(e)) => e,
+                        };
+                        if entry.file_type().is_dir()
+                            && entry.file_name().to_str().unwrap().eq("file-manager")
+                        {
+                            files.skip_current_dir();
+                        }
+                        if entry.file_type().is_file()
+                            && entry.file_name().to_str().unwrap().ends_with(".js")
+                        {
+                            debug!("entry: {:?}", entry);
+                            let name = entry.path().to_str().unwrap().strip_prefix("..").unwrap();
+                            let content = fs::read_to_string(entry.path()).await.unwrap();
+                            trace!("name='{}'\ncontent:\n{}", name, content);
+                            requests.push(Request::push_file(name, content.as_str()));
+                        }
+                    }
+                }
+                _ => todo!("not yet implemented"),
+            }
+
+            for request in requests.iter() {
+                let request_json = serde_json::to_string(&request).unwrap();
+
+                debug!("Sending message: {}", request_json);
+                outgoing.send(Message::text(request_json)).await.unwrap();
+            }
         }
     });
 
