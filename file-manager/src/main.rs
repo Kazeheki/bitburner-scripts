@@ -1,20 +1,14 @@
 //! Websocket Server to remotely manage the files on your Bitburner home server.
 
-use futures_util::SinkExt;
-use futures_util::StreamExt;
-use log::debug;
-use log::{error, info};
-use serde::Deserialize;
-use serde::Serialize;
-use serde_json::json;
-use serde_json::Map;
-use serde_json::Value;
 use std::net::SocketAddr;
+
+use futures_util::{SinkExt, StreamExt};
+use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::{
-    accept_async,
-    tungstenite::{Error, Message},
-};
+use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::{Error, Message};
 use tungstenite::Result;
 
 /// Possible methods for interacting with Bitburner remote API.
