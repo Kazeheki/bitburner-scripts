@@ -332,8 +332,15 @@ async fn handle_connection(
                         if entry.file_type().is_file()
                             && entry.file_name().to_str().unwrap().ends_with(".js")
                         {
+                            let mut name =
+                                entry.path().to_str().unwrap().strip_prefix("..").unwrap();
+                            let path_parts = entry.path().to_str().unwrap().split("/").count();
+                            if path_parts == 2 {
+                                // 2 => ../script.js
+                                // >2 => ../dir/script.js
+                                name = name.strip_prefix("/").unwrap();
+                            }
                             debug!("entry: {:?}", entry);
-                            let name = entry.path().to_str().unwrap().strip_prefix("..").unwrap();
                             let content = fs::read_to_string(entry.path()).await.unwrap();
                             trace!("name='{}'\ncontent:\n{}", name, content);
 
