@@ -1,7 +1,9 @@
 //! Websocket Server to remotely manage the files on your Bitburner home server.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::{process, thread};
 
 use futures_util::{SinkExt, StreamExt};
@@ -22,6 +24,8 @@ const JSONRPC_VERSION: &str = "2.0";
 
 /// Counter for request IDs.
 static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+type RequestMap = Arc<Mutex<HashMap<usize, BitburnerMethod>>>;
 
 /// Actions the user can choose from.
 enum Action {
@@ -166,6 +170,8 @@ enum GenericResponse<'a> {
 async fn main() {
     env_logger::init();
 
+    let request_map = RequestMap::new(Mutex::new(HashMap::new()));
+
     let addr = "127.0.0.1:18080";
 
     let listener = TcpListener::bind(&addr).await.expect("Cannot bind server");
@@ -177,15 +183,15 @@ async fn main() {
         let peer = stream.peer_addr().expect("No peer address");
         debug!("Peer address: {}", peer);
 
-        tokio::spawn(accept_connection(peer, stream));
+        tokio::spawn(accept_connection(peer, stream, request_map.clone()));
     }
 }
 
 /// Accepting websocket connections.
-async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
+async fn accept_connection(peer: SocketAddr, stream: TcpStream, request_map: RequestMap) {
     trace!("Accepting connection");
 
-    if let Err(e) = handle_connection(peer, stream).await {
+    if let Err(e) = handle_connection(peer, stream, request_map).await {
         match e {
             Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => handle_close(),
             err => error!("Error on processing connection: {}", err),
@@ -193,7 +199,11 @@ async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     }
 }
 
-async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
+async fn handle_connection(
+    peer: SocketAddr,
+    stream: TcpStream,
+    request_map: RequestMap,
+) -> Result<()> {
     let ws_stream = accept_async(stream).await.expect("Was not able to accept");
     debug!("New websocket connection with {}", peer);
     info!("Connected");
@@ -229,6 +239,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
         })
         .unwrap();
 
+    let local_request_map = request_map.clone();
     tokio::spawn(async move {
         loop {
             while let Some(msg) = incoming.next().await {
@@ -240,29 +251,38 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                     let response: GenericResponse = serde_json::from_str(msg.as_str()).unwrap();
 
                     match response {
-                        GenericResponse::VecResponse { result, error, .. } => {
+                        GenericResponse::VecResponse {
+                            result, error, id, ..
+                        } => {
                             if let Some(content) = result {
                                 info!("result:\n{}", content.join("\n"));
                             }
                             if let Some(error) = error {
                                 error!("RPC error: {}", error);
                             }
+                            local_request_map.lock().unwrap().remove(&id);
                         }
-                        GenericResponse::StringResponse { result, error, .. } => {
+                        GenericResponse::StringResponse {
+                            result, error, id, ..
+                        } => {
                             if let Some(content) = result {
                                 info!("result:\n{}", content);
                             }
                             if let Some(error) = error {
                                 error!("RPC error: {}", error);
                             }
+                            local_request_map.lock().unwrap().remove(&id);
                         }
                     }
                 }
-                inquire_thread.thread().unpark();
+                if local_request_map.lock().unwrap().len() == 0 {
+                    inquire_thread.thread().unpark();
+                }
             }
         }
     });
 
+    let local_request_map = request_map.clone();
     tokio::spawn(async move {
         while let Some(method) = action_receiver.recv().await {
             debug!("Will execute method {:?}", method);
@@ -270,8 +290,22 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
             let mut requests: Vec<Request> = vec![];
 
             match method {
-                BitburnerMethod::GetFileNames => requests.push(Request::get_file_names()),
-                BitburnerMethod::GetDefinitionFile => requests.push(Request::get_definition_file()),
+                BitburnerMethod::GetFileNames => {
+                    let request = Request::get_file_names();
+                    local_request_map
+                        .lock()
+                        .unwrap()
+                        .insert(request.id, BitburnerMethod::GetFileNames);
+                    requests.push(request);
+                }
+                BitburnerMethod::GetDefinitionFile => {
+                    let request = Request::get_definition_file();
+                    local_request_map
+                        .lock()
+                        .unwrap()
+                        .insert(request.id, BitburnerMethod::GetDefinitionFile);
+                    requests.push(request);
+                }
                 BitburnerMethod::PushFile => {
                     let mut files = WalkDir::new("..").into_iter();
 
@@ -293,7 +327,13 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                             let name = entry.path().to_str().unwrap().strip_prefix("..").unwrap();
                             let content = fs::read_to_string(entry.path()).await.unwrap();
                             trace!("name='{}'\ncontent:\n{}", name, content);
-                            requests.push(Request::push_file(name, content.as_str()));
+
+                            let request = Request::push_file(name, content.as_str());
+                            local_request_map
+                                .lock()
+                                .unwrap()
+                                .insert(request.id, BitburnerMethod::PushFile);
+                            requests.push(request);
                         }
                     }
                 }
