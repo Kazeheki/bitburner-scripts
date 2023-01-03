@@ -199,6 +199,7 @@ async fn accept_connection(peer: SocketAddr, stream: TcpStream, request_map: Req
     }
 }
 
+/// Setup listeners after connection is established.
 async fn handle_connection(
     peer: SocketAddr,
     stream: TcpStream,
@@ -247,43 +248,9 @@ async fn handle_connection(
                 if msg.is_close() {
                     break;
                 }
-                if let tungstenite::Message::Text(msg) = msg {
-                    let response: GenericResponse = serde_json::from_str(msg.as_str()).unwrap();
 
-                    match response {
-                        GenericResponse::VecResponse {
-                            result, error, id, ..
-                        } => {
-                            local_request_map.lock().unwrap().remove(&id);
-                            if let Some(content) = result {
-                                info!("result:\n{}", content.join("\n"));
-                            }
-                            if let Some(error) = error {
-                                error!("RPC error: {}", error);
-                            }
-                        }
-                        GenericResponse::StringResponse {
-                            result, error, id, ..
-                        } => {
-                            let (method, request) =
-                                local_request_map.lock().unwrap().remove(&id).unwrap();
-                            if let Some(content) = result {
-                                if matches!(method, BitburnerMethod::PushFile) {
-                                    info!(
-                                        "filename: {}, {}",
-                                        request.params.unwrap()["filename"],
-                                        content
-                                    );
-                                } else {
-                                    info!("result:\n{}", content);
-                                }
-                            }
-                            if let Some(error) = error {
-                                error!("RPC error: {}", error);
-                            }
-                        }
-                    }
-                }
+                process_response(msg, &local_request_map);
+
                 if local_request_map.lock().unwrap().len() == 0 {
                     inquire_thread.thread().unpark();
                 }
@@ -298,63 +265,7 @@ async fn handle_connection(
 
             let mut requests: Vec<Request> = vec![];
 
-            match method {
-                BitburnerMethod::GetFileNames => {
-                    let request = Request::get_file_names();
-                    local_request_map
-                        .lock()
-                        .unwrap()
-                        .insert(request.id, (BitburnerMethod::GetFileNames, request.clone()));
-                    requests.push(request);
-                }
-                BitburnerMethod::GetDefinitionFile => {
-                    let request = Request::get_definition_file();
-                    local_request_map.lock().unwrap().insert(
-                        request.id,
-                        (BitburnerMethod::GetDefinitionFile, request.clone()),
-                    );
-                    requests.push(request);
-                }
-                BitburnerMethod::PushFile => {
-                    let mut files = WalkDir::new("..").into_iter();
-
-                    loop {
-                        let entry = match files.next() {
-                            None => break,
-                            Some(Err(e)) => panic!("Error while walking dir: {}", e),
-                            Some(Ok(e)) => e,
-                        };
-                        if entry.file_type().is_dir()
-                            && entry.file_name().to_str().unwrap().eq("file-manager")
-                        {
-                            files.skip_current_dir();
-                        }
-                        if entry.file_type().is_file()
-                            && entry.file_name().to_str().unwrap().ends_with(".js")
-                        {
-                            let mut name =
-                                entry.path().to_str().unwrap().strip_prefix("..").unwrap();
-                            let path_parts = entry.path().to_str().unwrap().split("/").count();
-                            if path_parts == 2 {
-                                // 2 => ../script.js
-                                // >2 => ../dir/script.js
-                                name = name.strip_prefix("/").unwrap();
-                            }
-                            debug!("entry: {:?}", entry);
-                            let content = fs::read_to_string(entry.path()).await.unwrap();
-                            trace!("name='{}'\ncontent:\n{}", name, content);
-
-                            let request = Request::push_file(name, content.as_str());
-                            local_request_map
-                                .lock()
-                                .unwrap()
-                                .insert(request.id, (BitburnerMethod::PushFile, request.clone()));
-                            requests.push(request);
-                        }
-                    }
-                }
-                _ => todo!("not yet implemented"),
-            }
+            add_requests(&mut requests, method, &local_request_map).await;
 
             for request in requests.iter() {
                 let request_json = serde_json::to_string(&request).unwrap();
@@ -366,6 +277,117 @@ async fn handle_connection(
     });
 
     Ok(())
+}
+
+/// Process the answer from Bitburner.
+/// The response contains the id from the request.
+/// With that id, the original request from the request_map can be found.
+/// This method uses that fact to have special handling on responses to
+/// "PushFile" requests.
+fn process_response(response: tungstenite::Message, request_map: &RequestMap) {
+    if let tungstenite::Message::Text(msg) = response {
+        let response: GenericResponse = serde_json::from_str(msg.as_str()).unwrap();
+
+        match response {
+            GenericResponse::VecResponse {
+                result, error, id, ..
+            } => {
+                request_map.lock().unwrap().remove(&id);
+                if let Some(content) = result {
+                    info!("result:\n{}", content.join("\n"));
+                }
+                if let Some(error) = error {
+                    error!("RPC error: {}", error);
+                }
+            }
+            GenericResponse::StringResponse {
+                result, error, id, ..
+            } => {
+                let (method, request) = request_map.lock().unwrap().remove(&id).unwrap();
+                if let Some(content) = result {
+                    if matches!(method, BitburnerMethod::PushFile) {
+                        info!(
+                            "filename: {}, {}",
+                            request.params.unwrap()["filename"],
+                            content
+                        );
+                    } else {
+                        info!("result:\n{}", content);
+                    }
+                }
+                if let Some(error) = error {
+                    error!("RPC error: {}", error);
+                }
+            }
+        }
+    }
+}
+
+/// Add requests to the given request_map.
+/// Requests are created by the type of method passed.
+/// Methods like "PushFile" will create multiple requests where as
+/// "GetFileNames" for example will only add one request.
+async fn add_requests(
+    requests: &mut Vec<Request>,
+    method: BitburnerMethod,
+    request_map: &RequestMap,
+) {
+    match method {
+        BitburnerMethod::GetFileNames => {
+            let request = Request::get_file_names();
+            request_map
+                .lock()
+                .unwrap()
+                .insert(request.id, (BitburnerMethod::GetFileNames, request.clone()));
+            requests.push(request);
+        }
+        BitburnerMethod::GetDefinitionFile => {
+            let request = Request::get_definition_file();
+            request_map.lock().unwrap().insert(
+                request.id,
+                (BitburnerMethod::GetDefinitionFile, request.clone()),
+            );
+            requests.push(request);
+        }
+        BitburnerMethod::PushFile => {
+            let mut files = WalkDir::new("..").into_iter();
+
+            loop {
+                let entry = match files.next() {
+                    None => break,
+                    Some(Err(e)) => panic!("Error while walking dir: {}", e),
+                    Some(Ok(e)) => e,
+                };
+                if entry.file_type().is_dir()
+                    && entry.file_name().to_str().unwrap().eq("file-manager")
+                {
+                    files.skip_current_dir();
+                }
+                if entry.file_type().is_file()
+                    && entry.file_name().to_str().unwrap().ends_with(".js")
+                {
+                    let mut name = entry.path().to_str().unwrap().strip_prefix("..").unwrap();
+                    let path_parts = entry.path().to_str().unwrap().split("/").count();
+                    if path_parts == 2 {
+                        // 2 => ../script.js
+                        // >2 => ../dir/script.js
+                        name = name.strip_prefix("/").unwrap();
+                    }
+                    debug!("entry: {:?}", entry);
+                    let content = fs::read_to_string(entry.path()).await.unwrap();
+                    trace!("name='{}'\ncontent:\n{}", name, content);
+
+                    let request = Request::push_file(name, content.as_str());
+                    request_map
+                        .lock()
+                        .unwrap()
+                        .insert(request.id, (BitburnerMethod::PushFile, request.clone()));
+                    requests.push(request);
+                }
+            }
+        }
+        _ => todo!("not yet implemented"),
+    }
 }
 
 /// Clean up after the client closed the connection.
