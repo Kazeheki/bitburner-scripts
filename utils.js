@@ -112,15 +112,15 @@ function player_can_hack(ns, target) {
 export function hack_file_to_function(ns, file) {
     switch (file) {
         case "BruteSSH.exe":
-            return ns.brutessh;
+            return ns.brutessh.bind(ns);
         case "FTPCrack.exe":
-            return ns.ftpcrack;
+            return ns.ftpcrack.bind(ns);
         case "relaySMTP.exe":
-            return ns.relaysmtp;
+            return ns.relaysmtp.bind(ns);
         case "HTTPWorm.exe":
-            return ns.httpworm;
+            return ns.httpworm.bind(ns);
         case "SQLInject.exe":
-            return ns.sqlinject;
+            return ns.sqlinject.bind(ns);
         default:
             return (_) => { throw Error("Unknown hack-file") };
     }
