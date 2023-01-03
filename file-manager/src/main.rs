@@ -25,7 +25,7 @@ const JSONRPC_VERSION: &str = "2.0";
 /// Counter for request IDs.
 static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-type RequestMap = Arc<Mutex<HashMap<usize, BitburnerMethod>>>;
+type RequestMap = Arc<Mutex<HashMap<usize, (BitburnerMethod, Request)>>>;
 
 /// Actions the user can choose from.
 enum Action {
@@ -66,7 +66,7 @@ impl Action {
 }
 
 /// Possible methods for interacting with Bitburner remote API.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 enum BitburnerMethod {
     /// Create or update a file.
@@ -86,10 +86,10 @@ enum BitburnerMethod {
 }
 
 /// Request for any method to execute on remote API.
-#[derive(Serialize, Deserialize, Debug)]
-struct Request<'a> {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Request {
     /// Version of jsonrpc.
-    jsonrpc: &'a str,
+    jsonrpc: String,
     /// Request ID.
     id: usize,
     /// Method that the request invokes.
@@ -98,14 +98,14 @@ struct Request<'a> {
     params: Option<Map<String, Value>>,
 }
 
-impl Request<'_> {
+impl Request {
     /// Get all names of files on the home server.
     /// Bitburner will answer with [`Response<T>`].
     fn get_file_names() -> Self {
         let mut params = Map::with_capacity(1);
         params.insert(String::from("server"), json!("home"));
         Request {
-            jsonrpc: JSONRPC_VERSION,
+            jsonrpc: JSONRPC_VERSION.to_string(),
             id: REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             method: BitburnerMethod::GetFileNames,
             params: Some(params),
@@ -116,7 +116,7 @@ impl Request<'_> {
     /// Bitburner will answer with [`Response<String>`]
     fn get_definition_file() -> Self {
         Request {
-            jsonrpc: JSONRPC_VERSION,
+            jsonrpc: JSONRPC_VERSION.to_string(),
             id: REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             method: BitburnerMethod::GetDefinitionFile,
             params: None,
@@ -132,7 +132,7 @@ impl Request<'_> {
         params.insert(String::from("content"), json!(content));
 
         Request {
-            jsonrpc: JSONRPC_VERSION,
+            jsonrpc: JSONRPC_VERSION.to_string(),
             id: REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             method: BitburnerMethod::PushFile,
             params: Some(params),
@@ -254,24 +254,33 @@ async fn handle_connection(
                         GenericResponse::VecResponse {
                             result, error, id, ..
                         } => {
+                            local_request_map.lock().unwrap().remove(&id);
                             if let Some(content) = result {
                                 info!("result:\n{}", content.join("\n"));
                             }
                             if let Some(error) = error {
                                 error!("RPC error: {}", error);
                             }
-                            local_request_map.lock().unwrap().remove(&id);
                         }
                         GenericResponse::StringResponse {
                             result, error, id, ..
                         } => {
+                            let (method, request) =
+                                local_request_map.lock().unwrap().remove(&id).unwrap();
                             if let Some(content) = result {
-                                info!("result:\n{}", content);
+                                if matches!(method, BitburnerMethod::PushFile) {
+                                    info!(
+                                        "filename: {}, {}",
+                                        request.params.unwrap()["filename"],
+                                        content
+                                    );
+                                } else {
+                                    info!("result:\n{}", content);
+                                }
                             }
                             if let Some(error) = error {
                                 error!("RPC error: {}", error);
                             }
-                            local_request_map.lock().unwrap().remove(&id);
                         }
                     }
                 }
@@ -295,15 +304,15 @@ async fn handle_connection(
                     local_request_map
                         .lock()
                         .unwrap()
-                        .insert(request.id, BitburnerMethod::GetFileNames);
+                        .insert(request.id, (BitburnerMethod::GetFileNames, request.clone()));
                     requests.push(request);
                 }
                 BitburnerMethod::GetDefinitionFile => {
                     let request = Request::get_definition_file();
-                    local_request_map
-                        .lock()
-                        .unwrap()
-                        .insert(request.id, BitburnerMethod::GetDefinitionFile);
+                    local_request_map.lock().unwrap().insert(
+                        request.id,
+                        (BitburnerMethod::GetDefinitionFile, request.clone()),
+                    );
                     requests.push(request);
                 }
                 BitburnerMethod::PushFile => {
@@ -332,7 +341,7 @@ async fn handle_connection(
                             local_request_map
                                 .lock()
                                 .unwrap()
-                                .insert(request.id, BitburnerMethod::PushFile);
+                                .insert(request.id, (BitburnerMethod::PushFile, request.clone()));
                             requests.push(request);
                         }
                     }
