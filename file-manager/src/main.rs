@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{process, thread};
 
 use futures_util::{SinkExt, StreamExt};
+use inquire::error::InquireResult;
 use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -14,13 +15,51 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::{Error, Message};
 use tungstenite::Result;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 /// Current version of the used jsonrpc.
 const JSONRPC_VERSION: &str = "2.0";
 
 /// Counter for request IDs.
 static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// Actions the user can choose from.
+enum Action {
+    /// Pushing all JS files to Bitburner.
+    PushAllFiles,
+    /// Getting the definition file.
+    GetDefinitions,
+    /// Get all the filenames from Bitburner.
+    GetAllFileNames,
+    /// Quit the application.
+    Quit,
+}
+
+impl Action {
+    /// Convert Action to &str.
+    fn as_str(&self) -> &str {
+        match self {
+            Action::PushAllFiles => "push all files",
+            Action::GetDefinitions => "show definitions",
+            Action::GetAllFileNames => "show all filenames on home",
+            Action::Quit => "quit",
+        }
+    }
+
+    /// Convert InquireResult (selection) to an Action.
+    fn from(result: InquireResult<&str>) -> Self {
+        match result {
+            Ok(s) => match s {
+                "push all files" => return Action::PushAllFiles,
+                "show definitions" => return Action::GetDefinitions,
+                "show all filenames on home" => return Action::GetAllFileNames,
+                "quit" => return Action::Quit,
+                _ => panic!("Unknown Action '{}'", s),
+            },
+            Err(e) => panic!("Error in result: {}", e),
+        }
+    }
+}
 
 /// Possible methods for interacting with Bitburner remote API.
 #[derive(Serialize, Deserialize, Debug)]
@@ -161,24 +200,30 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
 
     let (mut outgoing, mut incoming) = ws_stream.split();
 
-    let (method_sender, mut method_receiver) = mpsc::unbounded_channel::<BitburnerMethod>();
+    let (action_sender, mut action_receiver) = mpsc::unbounded_channel::<BitburnerMethod>();
 
     let inquire_thread = thread::Builder::new()
         .spawn(move || loop {
-            let options = vec!["file names", "push all", "definition", "quit"];
+            let options = vec![
+                Action::GetAllFileNames,
+                Action::PushAllFiles,
+                Action::GetDefinitions,
+                Action::Quit,
+            ];
+            let options: Vec<_> = options.iter().map(|o| o.as_str()).collect();
             let answer: Result<&str, _> =
                 inquire::Select::new("What do you want to do?", options).prompt();
+            let answer: Action = Action::from(answer);
 
             match answer {
-                Ok(x) if x == "file names" => {
-                    method_sender.send(BitburnerMethod::GetFileNames).unwrap()
+                Action::GetAllFileNames => {
+                    action_sender.send(BitburnerMethod::GetFileNames).unwrap()
                 }
-                Ok(x) if x == "push all" => method_sender.send(BitburnerMethod::PushFile).unwrap(),
-                Ok(x) if x == "definition" => method_sender
+                Action::PushAllFiles => action_sender.send(BitburnerMethod::PushFile).unwrap(),
+                Action::GetDefinitions => action_sender
                     .send(BitburnerMethod::GetDefinitionFile)
                     .unwrap(),
-                Ok(x) if x == "quit" => process::exit(0),
-                _ => unreachable!("how did you get here?"),
+                Action::Quit => process::exit(0),
             }
             thread::park();
         })
@@ -219,7 +264,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     });
 
     tokio::spawn(async move {
-        while let Some(method) = method_receiver.recv().await {
+        while let Some(method) = action_receiver.recv().await {
             debug!("Will execute method {:?}", method);
 
             let mut requests: Vec<Request> = vec![];
