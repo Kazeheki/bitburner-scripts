@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+wget -O external/NetscriptDefinitions.d.ts \
+    https://raw.githubusercontent.com/bitburner-official/bitburner-src/dev/src/ScriptEditor/NetscriptDefinitions.d.ts
