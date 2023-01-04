@@ -1,4 +1,4 @@
-const money_threshold = 0.75;
+const default_money_threshold = 0.75;
 
 /**
  * basic hack script.
@@ -11,6 +11,8 @@ export async function main(ns) {
     if (raw_target == null || raw_target.toString().trim() === "") {
         throw Error("no target given");
     }
+    
+    const money_threshold  = Number(ns.args[1]) || default_money_threshold;
 
     const target = raw_target.toString();
     const min_security_level = ns.getServerMinSecurityLevel(target);
@@ -30,7 +32,7 @@ export async function main(ns) {
         if (!last_hack_successful || is_hard_to_hack(ns, target, min_security_level)) {
             await ns.weaken(target);
             last_hack_successful = true;
-        } else if (is_money_low(ns, target, server_max_money) && server_growth > 0 && available_money > 0) {
+        } else if (is_money_low(ns, target, server_max_money, money_threshold) && server_growth > 0 && available_money > 0) {
             await ns.grow(target);
         } else {
             const earned = await ns.hack(target);
@@ -52,7 +54,8 @@ function is_hard_to_hack(ns, target, min_security_level) {
  * @param {import("external/NetscriptDefinitions").NS} ns 
  * @param {string} target 
  * @param {number} server_max_money
+ * @param {number} money_threshold
  */
-function is_money_low(ns, target, server_max_money) {
+function is_money_low(ns, target, server_max_money, money_threshold) {
     return ns.getServerMoneyAvailable(target) < server_max_money * money_threshold;
 }

@@ -11,6 +11,8 @@ const hack_script = "hack.js";
 export async function main(ns) {
     const script_ram = ns.getScriptRam(hack_script);
 
+    const money_threshold = ns.args[0] || null;
+
     ns.disableLog("getServerMaxRam");
     ns.disableLog("getServerUsedRam");
     ns.disableLog("getServerMoneyAvailable");
@@ -35,7 +37,7 @@ export async function main(ns) {
                 if (threads > 0) {
                     ns.rm(hack_script, server);
                     ns.scp(hack_script, server, "home");
-                    ns.exec(hack_script, server, threads, target);
+                    ns.exec(hack_script, server, threads, target, money_threshold);
                 }
             });
 
