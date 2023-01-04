@@ -1,7 +1,7 @@
-const FILES = [
-    "/manager/servers.js",
-    "/manager/deploy-hack.js",
-    "/manager/hacknodes.js"
+const ACTIONS = [
+    ["/manager/servers.js"],
+    ["/manager/deploy-hack.js", 0.3],
+    ["/manager/hacknodes.js"]
 ];
 /**
  * Start all the manager scripts.
@@ -9,9 +9,10 @@ const FILES = [
  * @param {import("external/NetscriptDefinitions").NS} ns 
  */
 export async function main(ns) {
-    for (let file of FILES) {
+    for (let action of ACTIONS) {
+        let [file, ...args] = action;
         if (ns.fileExists(file)) {
-            ns.exec(file, "home");
+            ns.exec(file, "home", 1, ...args);
         }
     }
 }
