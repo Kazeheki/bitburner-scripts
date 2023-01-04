@@ -1,7 +1,7 @@
 const FILES = [
-    "manager/servers.js",
-    "manager/deploy-hack.js",
-    "manager/hacknodes.js"
+    "/manager/servers.js",
+    "/manager/deploy-hack.js",
+    "/manager/hacknodes.js"
 ];
 /**
  * Start all the manager scripts.
